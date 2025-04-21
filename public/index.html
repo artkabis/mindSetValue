@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyseur de Sentiment Français</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Analyseur de Sentiment en Français</h1>
+        
+        <div class="input-group">
+            <label for="text-input">Entrez votre texte à analyser :</label>
+            <textarea id="text-input" placeholder="Écrivez ou collez votre texte ici..."></textarea>
+        </div>
+
+        <div class="example-buttons">
+            <div class="example-btn">Ce produit est vraiment excellent, je le recommande !</div>
+            <div class="example-btn">Je suis un peu déçu de cette expérience, c'était pas terrible.</div>
+            <div class="example-btn">Bonjour aujourd'hui je me suis levé un petit peu tard j'avoue que j'ai des cernes sous les yeux et côté heureux c'est bof bof</div>
+            <div class="example-btn">C'est pas mal mais ça pourrait être mieux.</div>
+        </div>
+
+        <button id="analyze-btn">Analyser le sentiment</button>
+
+        <div id="results" class="results">
+            <div class="result-card">
+                <div class="sentiment-score">
+                    <div class="score-label">Score de sentiment:</div>
+                    <div class="score-value">0.5</div>
+                </div>
+                
+                <div id="sentiment-type">Neutre</div>
+                
+                <div class="meter-container">
+                    <div class="meter-marker"></div>
+                    <div class="meter-fill" style="width: 50%"></div>
+                </div>
+                
+                <div class="meter-labels">
+                    <div>Négatif</div>
+                    <div>Neutre</div>
+                    <div>Positif</div>
+                </div>
+
+                <div class="confidence">
+                    <div class="confidence-label">Confiance: <span id="confidence-value">60%</span></div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" style="width: 60%"></div>
+                    </div>
+                </div>
+                
+                <div class="details">
+                    <div class="details-title" id="toggle-words">
+                        <span>Mots identifiés (<span id="words-count">0</span>)</span>
+                        <span>+</span>
+                    </div>
+                    <div class="details-content" id="words-content">
+                        <div class="word-chips" id="word-chips"></div>
+                    </div>
+                    
+                    <div class="details-title" id="toggle-expressions">
+                        <span>Expressions identifiées (<span id="expressions-count">0</span>)</span>
+                        <span>+</span>
+                    </div>
+                    <div class="details-content" id="expressions-content">
+                        <div id="expressions-list"></div>
+                    </div>
+                    
+                    <div class="details-title" id="toggle-modifiers">
+                        <span>Modificateurs détectés (<span id="modifiers-count">0</span>)</span>
+                        <span>+</span>
+                    </div>
+                    <div class="details-content" id="modifiers-content">
+                        <div id="modifiers-list"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            Analyseur de sentiment français - Basé sur un lexique personnalisé
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
