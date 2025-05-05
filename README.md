@@ -55,8 +55,7 @@ Toutes les configurations sont externalisées dans un dictionnaire JSON pour fac
 
 1. Clonez le dépôt :
    ```bash
-   git clone https://github.com/votre-nom/analyseur-sentiment-contextuel.git
-   cd analyseur-sentiment-contextuel
+   git clone [https://github.com/artkabis/mindSetValue.git](https://github.com/artkabis/mindSetValue.git)
    ```
 
 2. Installez les dépendances :
