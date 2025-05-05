@@ -22,6 +22,7 @@ class SentimentAnalyzer {
     // Composés
     this.modifierPrefixes = dictionary.compounds?.modifierPrefixes || {};
     this.idioms = dictionary.compounds?.idioms || {};
+    this.idiomPatterns = dictionary.compounds?.idiomPatterns || {}; // Nouveau: patterns d'idiomes
     this.negationWords = dictionary.compounds?.negationWords || [];
 
     // Émojis
@@ -32,6 +33,7 @@ class SentimentAnalyzer {
     this.config = {
       negationWindow: config.negationWindow || 5,
       contextWindow: config.contextWindow || 3,
+      idiomDetectionRadius: config.idiomDetectionRadius || 5, // Nouveau: rayon de détection pour idiomes
     };
   }
 
@@ -67,14 +69,26 @@ class SentimentAnalyzer {
     let wordCount = 0;
     let confidence = 0;
 
-    // Analyse des expressions idiomatiques
-    for (const [idiom, score] of Object.entries(this.idioms)) {
-      if (normalizedText.includes(idiom)) {
-        details.idioms.push({ phrase: idiom, score });
-        totalScore += score;
-        wordCount += 1;
-        confidence += 0.8;
+    // Analyse des expressions idiomatiques avec méthode avancée si disponible
+    let detectedIdioms = [];
+    if (this.idiomPatterns && Object.keys(this.idiomPatterns).length > 0) {
+      // Utiliser la nouvelle méthode de détection avancée
+      detectedIdioms = this._detectIdioms(normalizedText);
+    } else {
+      // Utiliser la méthode simple originale
+      for (const [idiom, score] of Object.entries(this.idioms)) {
+        if (normalizedText.includes(idiom)) {
+          detectedIdioms.push({ phrase: idiom, score });
+        }
       }
+    }
+
+    // Traiter les idiomes détectés
+    for (const idiom of detectedIdioms) {
+      details.idioms.push(idiom);
+      totalScore += idiom.score;
+      wordCount += 1;
+      confidence += 0.8;
     }
 
     // Analyse des émojis
@@ -235,6 +249,153 @@ class SentimentAnalyzer {
   }
 
   /**
+   * Détecte les expressions idiomatiques dans un texte en tenant compte des conjugaisons
+   * et des différentes formes possibles
+   * @private
+   */
+  _detectIdioms(text) {
+    const words = text.split(" ");
+    const detectedIdioms = [];
+    const radius = this.config.idiomDetectionRadius;
+    
+    // Créer un dictionnaire des formes d'idiomes possibles
+    const idiomKeywords = {};
+    
+    // Parcourir tous les idiomes pour extraire des mots-clés significatifs
+    for (const [idiom, score] of Object.entries(this.idioms)) {
+      // Extraire les mots de l'idiome
+      const idiomWords = idiom.split(" ");
+      
+      // Pour les idiomes qui commencent par un verbe courant (être, avoir),
+      // considérer les mots suivants comme plus significatifs
+      if (idiomWords.length >= 2 && 
+          (idiomWords[0] === "être" || idiomWords[0] === "avoir" || 
+           idiomWords[0] === "se" || idiomWords[0] === "faire")) {
+        // Utiliser le reste de l'expression comme mot-clé
+        const keyword = idiomWords.slice(1).join(" ");
+        if (keyword.length > 2) { // Ignorer les mots-clés trop courts
+          if (!idiomKeywords[keyword]) {
+            idiomKeywords[keyword] = [];
+          }
+          idiomKeywords[keyword].push({ fullIdiom: idiom, score });
+        }
+      } else {
+        // Sinon, utiliser l'idiome complet
+        if (!idiomKeywords[idiom]) {
+          idiomKeywords[idiom] = [];
+        }
+        idiomKeywords[idiom].push({ fullIdiom: idiom, score });
+      }
+    }
+    
+    // Parcourir le texte pour rechercher les idiomes potentiels
+    for (let i = 0; i < words.length; i++) {
+      // Vérifier si des mots-clés commencent à cette position
+      for (const [keyword, idiomInfos] of Object.entries(idiomKeywords)) {
+        const keywordWords = keyword.split(" ");
+        
+        // Vérifier si le mot-clé correspond à cette position dans le texte
+        let matchesKeyword = true;
+        for (let j = 0; j < keywordWords.length && i + j < words.length; j++) {
+          if (words[i + j] !== keywordWords[j]) {
+            matchesKeyword = false;
+            break;
+          }
+        }
+        
+        if (matchesKeyword) {
+          // Vérifier si un verbe d'idiome ou un pronom est présent avant
+          // dans la fenêtre de détection
+          for (const { fullIdiom, score } of idiomInfos) {
+            const idiomParts = fullIdiom.split(" ");
+            const firstWord = idiomParts[0];
+            
+            // Vérifier si c'est un idiome avec un verbe courant au début
+            if (firstWord === "être" || firstWord === "avoir" || 
+                firstWord === "se" || firstWord === "faire") {
+              let verbFound = false;
+              
+              // Rechercher en arrière pour trouver un verbe ou pronom correspondant
+              for (let k = Math.max(0, i - radius); k < i; k++) {
+                const candidateWord = words[k];
+                
+                // Rechercher les formes conjuguées du verbe
+                if (firstWord === "être" && this.idiomPatterns["être"]) {
+                  if (this.idiomPatterns["être"].includes(candidateWord)) {
+                    verbFound = true;
+                    break;
+                  }
+                } 
+                else if (firstWord === "avoir" && this.idiomPatterns["avoir"]) {
+                  if (this.idiomPatterns["avoir"].includes(candidateWord)) {
+                    verbFound = true;
+                    break;
+                  }
+                }
+                else if (firstWord === "se" && this.idiomPatterns["se faire"]) {
+                  // Rechercher des formes comme "me fais", "se fait", etc.
+                  if (this.idiomPatterns["se faire"].includes(candidateWord)) {
+                    verbFound = true;
+                    break;
+                  }
+                  
+                  // Vérifier si un pronom réfléchi se trouve à proximité
+                  if (this.idiomPatterns["pronouns"] && 
+                      this.idiomPatterns["pronouns"].includes(candidateWord)) {
+                    // Rechercher "faire" après le pronom
+                    if (k + 1 < i && words[k + 1].startsWith("fai")) {
+                      verbFound = true;
+                      break;
+                    }
+                  }
+                }
+                else if (firstWord === "faire" && candidateWord.startsWith("fai")) {
+                  verbFound = true;
+                  break;
+                }
+                
+                // Vérifier également si un pronom se trouve à proximité
+                if (this.idiomPatterns["pronouns"] && 
+                    this.idiomPatterns["pronouns"].includes(candidateWord)) {
+                  // Si on trouve un pronom, le verbe est probablement juste après
+                  if (k + 1 < i) {
+                    const nextWord = words[k + 1];
+                    if ((firstWord === "être" && nextWord.startsWith("s")) ||
+                        (firstWord === "avoir" && nextWord.startsWith("a")) ||
+                        (firstWord === "faire" && nextWord.startsWith("fai"))) {
+                      verbFound = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              // Si un verbe ou pronom approprié a été trouvé, enregistrer l'idiome
+              if (verbFound) {
+                detectedIdioms.push({
+                  phrase: fullIdiom,
+                  score: score,
+                  position: { start: i, end: i + keywordWords.length - 1 }
+                });
+              }
+            } else {
+              // Pour les idiomes qui ne commencent pas par un verbe courant,
+              // les enregistrer directement
+              detectedIdioms.push({
+                phrase: fullIdiom,
+                score: score,
+                position: { start: i, end: i + keywordWords.length - 1 }
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    return detectedIdioms;
+  }
+
+  /**
    * Obtient les mots contextuels autour d'un mot spécifique
    * @private
    */
@@ -314,6 +475,155 @@ class SentimentAnalyzer {
     return "très négatif";
   }
 }
+
+/**
+ * Classe pour tester et évaluer les performances de l'analyseur
+ */
+class SentimentEvaluator {
+  constructor(analyzer, contextualAnalyzer) {
+    this.analyzer = analyzer;
+    this.contextualAnalyzer = contextualAnalyzer;
+  }
+
+  /**
+   * Évalue l'analyseur sur un ensemble de textes avec des sentiments attendus
+   * @param {Array} testCases - Tableau d'objets {text, expectedSentiment}
+   * @returns {Object} Résultats d'évaluation
+   */
+  evaluate(testCases) {
+    const results = {
+      total: testCases.length,
+      correct: 0,
+      contextualCorrect: 0,
+      accuracy: 0,
+      contextualAccuracy: 0,
+      details: [],
+    };
+
+    for (const testCase of testCases) {
+      const basicAnalysis = this.analyzer.analyze(testCase.text);
+      const contextualAnalysis = this.contextualAnalyzer.analyze(testCase.text);
+
+      const isBasicCorrect =
+        basicAnalysis.sentiment === testCase.expectedSentiment;
+      const isContextualCorrect =
+        contextualAnalysis.contextualSentiment === testCase.expectedSentiment;
+
+      if (isBasicCorrect) results.correct++;
+      if (isContextualCorrect) results.contextualCorrect++;
+
+      results.details.push({
+        text: testCase.text,
+        expected: testCase.expectedSentiment,
+        basicResult: {
+          sentiment: basicAnalysis.sentiment,
+          score: basicAnalysis.score,
+          correct: isBasicCorrect,
+        },
+        contextualResult: {
+          sentiment: contextualAnalysis.contextualSentiment,
+          score: contextualAnalysis.contextualScore,
+          correct: isContextualCorrect,
+        },
+      });
+    }
+
+    results.accuracy = results.total > 0 ? results.correct / results.total : 0;
+    results.contextualAccuracy =
+      results.total > 0 ? results.contextualCorrect / results.total : 0;
+
+    return results;
+  }
+
+  /**
+   * Compare les deux analyseurs sur un texte donné
+   * @param {string} text - Le texte à analyser
+   * @returns {Object} Comparaison détaillée
+   */
+  compareAnalyzers(text) {
+    const basicAnalysis = this.analyzer.analyze(text);
+    const contextualAnalysis = this.contextualAnalyzer.analyze(text);
+
+    // Différence entre les scores
+    const scoreDifference =
+      contextualAnalysis.contextualScore - basicAnalysis.score;
+
+    // Description de la différence
+    let differenceDescription = "";
+    if (Math.abs(scoreDifference) < 0.05) {
+      differenceDescription =
+        "Les deux analyseurs produisent des résultats similaires pour ce texte.";
+    } else if (scoreDifference > 0) {
+      differenceDescription = `L'analyse contextuelle produit un score plus positif (+ ${(
+        scoreDifference * 100
+      ).toFixed(1)}%).`;
+    } else {
+      differenceDescription = `L'analyse contextuelle produit un score plus négatif (- ${(
+        Math.abs(scoreDifference) * 100
+      ).toFixed(1)}%).`;
+    }
+
+    // Facteurs qui ont eu le plus d'impact
+    const impactFactors = [];
+    if (contextualAnalysis.contextFactors) {
+      const factors = contextualAnalysis.contextFactors;
+
+      if (factors.progression && Math.abs(factors.progression.impact) > 0.05) {
+        impactFactors.push({
+          name: "Progression",
+          impact: factors.progression.impact,
+          description: `Évolution de ${(
+            factors.progression.progression * 100
+          ).toFixed(1)}% entre le début et la fin`,
+        });
+      }
+
+      if (factors.conclusion && Math.abs(factors.conclusion.impact) > 0.05) {
+        impactFactors.push({
+          name: "Conclusion",
+          impact: factors.conclusion.impact,
+          description: `La conclusion a un impact de ${(
+            factors.conclusion.impact * 100
+          ).toFixed(1)}%`,
+        });
+      }
+
+      if (factors.transitions && Math.abs(factors.transitions.impact) > 0.05) {
+        impactFactors.push({
+          name: "Transitions",
+          impact: factors.transitions.impact,
+          description: `Les transitions ont un impact de ${(
+            factors.transitions.impact * 100
+          ).toFixed(1)}%`,
+        });
+      }
+
+      if (factors.narrative && Math.abs(factors.narrative.impact) > 0.05) {
+        impactFactors.push({
+          name: "Structure narrative",
+          impact: factors.narrative.impact,
+          description: factors.narrative.description,
+        });
+      }
+    }
+
+    // Trier par impact absolu décroissant
+    impactFactors.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
+
+    return {
+      basicAnalysis,
+      contextualAnalysis,
+      comparison: {
+        scoreDifference: parseFloat(scoreDifference.toFixed(2)),
+        sentimentChange:
+          basicAnalysis.sentiment !== contextualAnalysis.contextualSentiment,
+        description: differenceDescription,
+        impactFactors,
+      },
+    };
+  }
+}
+
 /**
  * Analyseur contextuel avancé
  * Comprend la structure du texte, les transitions et l'évolution du sentiment
@@ -832,6 +1142,7 @@ class ContextualAnalyzer {
         return "Indéterminé";
     }
   }
+  
   /**
    * Calcule le score contextuel final
    * @private
@@ -955,175 +1266,24 @@ class ContextualAnalyzer {
   }
 }
 
-/**
- * Classe pour tester et évaluer les performances de l'analyseur
- */
-class SentimentEvaluator {
-  constructor(analyzer, contextualAnalyzer) {
-    this.analyzer = analyzer;
-    this.contextualAnalyzer = contextualAnalyzer;
-  }
-
-  /**
-   * Évalue l'analyseur sur un ensemble de textes avec des sentiments attendus
-   * @param {Array} testCases - Tableau d'objets {text, expectedSentiment}
-   * @returns {Object} Résultats d'évaluation
-   */
-  evaluate(testCases) {
-    const results = {
-      total: testCases.length,
-      correct: 0,
-      contextualCorrect: 0,
-      accuracy: 0,
-      contextualAccuracy: 0,
-      details: [],
-    };
-
-    for (const testCase of testCases) {
-      const basicAnalysis = this.analyzer.analyze(testCase.text);
-      const contextualAnalysis = this.contextualAnalyzer.analyze(testCase.text);
-
-      const isBasicCorrect =
-        basicAnalysis.sentiment === testCase.expectedSentiment;
-      const isContextualCorrect =
-        contextualAnalysis.contextualSentiment === testCase.expectedSentiment;
-
-      if (isBasicCorrect) results.correct++;
-      if (isContextualCorrect) results.contextualCorrect++;
-
-      results.details.push({
-        text: testCase.text,
-        expected: testCase.expectedSentiment,
-        basicResult: {
-          sentiment: basicAnalysis.sentiment,
-          score: basicAnalysis.score,
-          correct: isBasicCorrect,
-        },
-        contextualResult: {
-          sentiment: contextualAnalysis.contextualSentiment,
-          score: contextualAnalysis.contextualScore,
-          correct: isContextualCorrect,
-        },
-      });
-    }
-
-    results.accuracy = results.total > 0 ? results.correct / results.total : 0;
-    results.contextualAccuracy =
-      results.total > 0 ? results.contextualCorrect / results.total : 0;
-
-    return results;
-  }
-
-  /**
-   * Compare les deux analyseurs sur un texte donné
-   * @param {string} text - Le texte à analyser
-   * @returns {Object} Comparaison détaillée
-   */
-  compareAnalyzers(text) {
-    const basicAnalysis = this.analyzer.analyze(text);
-    const contextualAnalysis = this.contextualAnalyzer.analyze(text);
-
-    // Différence entre les scores
-    const scoreDifference =
-      contextualAnalysis.contextualScore - basicAnalysis.score;
-
-    // Description de la différence
-    let differenceDescription = "";
-    if (Math.abs(scoreDifference) < 0.05) {
-      differenceDescription =
-        "Les deux analyseurs produisent des résultats similaires pour ce texte.";
-    } else if (scoreDifference > 0) {
-      differenceDescription = `L'analyse contextuelle produit un score plus positif (+ ${(
-        scoreDifference * 100
-      ).toFixed(1)}%).`;
-    } else {
-      differenceDescription = `L'analyse contextuelle produit un score plus négatif (- ${(
-        Math.abs(scoreDifference) * 100
-      ).toFixed(1)}%).`;
-    }
-
-    // Facteurs qui ont eu le plus d'impact
-    const impactFactors = [];
-    if (contextualAnalysis.contextFactors) {
-      const factors = contextualAnalysis.contextFactors;
-
-      if (factors.progression && Math.abs(factors.progression.impact) > 0.05) {
-        impactFactors.push({
-          name: "Progression",
-          impact: factors.progression.impact,
-          description: `Évolution de ${(
-            factors.progression.progression * 100
-          ).toFixed(1)}% entre le début et la fin`,
-        });
-      }
-
-      if (factors.conclusion && Math.abs(factors.conclusion.impact) > 0.05) {
-        impactFactors.push({
-          name: "Conclusion",
-          impact: factors.conclusion.impact,
-          description: `La conclusion a un impact de ${(
-            factors.conclusion.impact * 100
-          ).toFixed(1)}%`,
-        });
-      }
-
-      if (factors.transitions && Math.abs(factors.transitions.impact) > 0.05) {
-        impactFactors.push({
-          name: "Transitions",
-          impact: factors.transitions.impact,
-          description: `Les transitions ont un impact de ${(
-            factors.transitions.impact * 100
-          ).toFixed(1)}%`,
-        });
-      }
-
-      if (factors.narrative && Math.abs(factors.narrative.impact) > 0.05) {
-        impactFactors.push({
-          name: "Structure narrative",
-          impact: factors.narrative.impact,
-          description: factors.narrative.description,
-        });
-      }
-    }
-
-    // Trier par impact absolu décroissant
-    impactFactors.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
-
-    return {
-      basicAnalysis,
-      contextualAnalysis,
-      comparison: {
-        scoreDifference: parseFloat(scoreDifference.toFixed(2)),
-        sentimentChange:
-          basicAnalysis.sentiment !== contextualAnalysis.contextualSentiment,
-        description: differenceDescription,
-        impactFactors,
-      },
-    };
-  }
-}
+// Définir les variables d'exportation en dehors des blocs, avec valeurs par défaut
+let analyzer = null;
+let contextualAnalyzer = null;
+let evaluator = null;
 
 // Charger le dictionnaire et créer l'analyseur
 try {
   const sentimentDictionary = JSON.parse(
     fs.readFileSync(dictionaryPath, "utf8")
   );
-  const analyzer = new SentimentAnalyzer(sentimentDictionary);
-  const contextualAnalyzer = new ContextualAnalyzer(
+
+  analyzer = new SentimentAnalyzer(sentimentDictionary);
+  contextualAnalyzer = new ContextualAnalyzer(
     analyzer,
     sentimentDictionary
-  ); // Assurez-vous que le dictionnaire est passé ici
-  const evaluator = new SentimentEvaluator(analyzer, contextualAnalyzer);
+  );
+  evaluator = new SentimentEvaluator(analyzer, contextualAnalyzer);
 
-  // Exporter les classes et les instances
-  module.exports = {
-    SentimentAnalyzer,
-    ContextualAnalyzer,
-    SentimentEvaluator,
-    analyzer,
-    contextualAnalyzer,
-    evaluator,
-  };
 } catch (error) {
   console.error(
     "Erreur lors du chargement du dictionnaire de sentiment:",
@@ -1139,22 +1299,27 @@ try {
     compounds: {
       modifierPrefixes: {},
       idioms: {},
+      idiomPatterns: {}, // Ajout du nouvel élément
       negationWords: [],
     },
     emojiSentiments: {},
-    config: {},
+    config: {
+      idiomDetectionRadius: 5
+    },
   };
 
-  const analyzer = new SentimentAnalyzer(emptyDict);
-  const contextualAnalyzer = new ContextualAnalyzer(analyzer, emptyDict); // Passer emptyDict ici aussi
-  const evaluator = new SentimentEvaluator(analyzer, contextualAnalyzer);
-  // Exporter quand même pour ne pas casser l'application
-  module.exports = {
-    SentimentAnalyzer,
-    ContextualAnalyzer,
-    SentimentEvaluator,
-    analyzer,
-    contextualAnalyzer,
-    evaluator,
-  };
+  // Créer des instances avec le dictionnaire vide
+  analyzer = new SentimentAnalyzer(emptyDict);
+  contextualAnalyzer = new ContextualAnalyzer(analyzer, emptyDict);
+  evaluator = new SentimentEvaluator(analyzer, contextualAnalyzer);
 }
+
+// Exporter les classes et les instances (toujours exécuté, peu importe si une erreur s'est produite)
+module.exports = {
+  SentimentAnalyzer,
+  ContextualAnalyzer,
+  SentimentEvaluator,
+  analyzer,
+  contextualAnalyzer,
+  evaluator,
+};
